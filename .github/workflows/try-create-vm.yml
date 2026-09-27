@@ -15,26 +15,19 @@ jobs:
       - name: Setup OCI credentials
         env:
           KEY_B64: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+          OCI_USER: ${{ secrets.OCI_CLI_USER }}
+          OCI_FP: ${{ secrets.OCI_CLI_FINGERPRINT }}
+          OCI_TEN: ${{ secrets.OCI_CLI_TENANCY }}
+          OCI_REG: ${{ secrets.OCI_CLI_REGION }}
         run: |
-          mkdir -p /home/runner/.oci
-          echo "$KEY_B64" | base64 -d > /home/runner/.oci/key.pem
-          chmod 600 /home/runner/.oci/key.pem
-          
-          cat > /home/runner/.oci/config << CFG
-          [DEFAULT]
-          user=${{ secrets.OCI_CLI_USER }}
-          fingerprint=${{ secrets.OCI_CLI_FINGERPRINT }}
-          tenancy=${{ secrets.OCI_CLI_TENANCY }}
-          region=${{ secrets.OCI_CLI_REGION }}
-          key_file=/home/runner/.oci/key.pem
-          CFG
-          
-          chmod 600 /home/runner/.oci/config
-          echo "=== Key size ==="
-          wc -c /home/runner/.oci/key.pem
+          mkdir -p ~/.oci
+          echo "$KEY_B64" | base64 -d > ~/.oci/key.pem
+          chmod 600 ~/.oci/key.pem
+          printf '[DEFAULT]\nuser=%s\nfingerprint=%s\ntenancy=%s\nregion=%s\nkey_file=%s/.oci/key.pem\n' "$OCI_USER" "$OCI_FP" "$OCI_TEN" "$OCI_REG" "$HOME" > ~/.oci/config
+          chmod 600 ~/.oci/config
           echo "=== Config ==="
-          cat /home/runner/.oci/config
-          echo "=== Test connection ==="
+          cat ~/.oci/config
+          echo "=== Test ==="
           oci iam region list --output table | head -5
 
       - name: Try Create VM
