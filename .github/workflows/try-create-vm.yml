@@ -1,0 +1,47 @@
+name: Try to Create OCI VM
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  create-vm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install OCI CLI
+        run: |
+          pip install oci-cli
+      - name: Configure OCI
+        run: |
+          mkdir -p ~/.oci
+          echo "${{ secrets.OCI_CLI_KEY_CONTENT }}" > ~/.oci/key.pem
+          chmod 600 ~/.oci/key.pem
+          cat > ~/.oci/config << CONFIGEOF
+          [DEFAULT]
+          user=${{ secrets.OCI_CLI_USER }}
+          fingerprint=${{ secrets.OCI_CLI_FINGERPRINT }}
+          tenancy=${{ secrets.OCI_CLI_TENANCY }}
+          region=${{ secrets.OCI_CLI_REGION }}
+          key_file=/home/runner/.oci/key.pem
+          CONFIGEOF
+      - name: Try Create VM
+        run: |
+          for AD in "Uocm:EU-FRANKFURT-1-AD-1" "Uocm:EU-FRANKFURT-1-AD-2" "Uocm:EU-FRANKFURT-1-AD-3"; do
+            echo "=== Trying $AD ==="
+            if oci compute instance launch \
+              --availability-domain "$AD" \
+              --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
+              --shape "VM.Standard.A1.Flex" \
+              --shape-config '{"ocpus": 2, "memoryInGBs": 12}' \
+              --image-id "${{ secrets.IMAGE_ID }}" \
+              --subnet-id "${{ secrets.OCI_SUBNET_ID }}" \
+              --assign-public-ip true \
+              --display-name "Asia" \
+              --metadata '{"ssh_authorized_keys": "${{ secrets.SSH_PUBLIC_KEY }}"}' 2>&1; then
+              echo "SUCCESS!"
+              exit 0
+            fi
+          done
+          echo "All ADs failed"
+          exit 1
