@@ -20,15 +20,27 @@ jobs:
           OCI_TEN: ${{ secrets.OCI_CLI_TENANCY }}
           OCI_REG: ${{ secrets.OCI_CLI_REGION }}
         run: |
-          mkdir -p ~/.oci
-          echo "$KEY_B64" | base64 -d > ~/.oci/key.pem
-          chmod 600 ~/.oci/key.pem
-          printf '[DEFAULT]\nuser=%s\nfingerprint=%s\ntenancy=%s\nregion=%s\nkey_file=%s/.oci/key.pem\n' "$OCI_USER" "$OCI_FP" "$OCI_TEN" "$OCI_REG" "$HOME" > ~/.oci/config
-          chmod 600 ~/.oci/config
+          mkdir -p $HOME/.oci
+          echo "$KEY_B64" | base64 -d > $HOME/.oci/key.pem
+          chmod 600 $HOME/.oci/key.pem
+          
+          echo "[DEFAULT]" > $HOME/.oci/config
+          echo "user=$OCI_USER" >> $HOME/.oci/config
+          echo "fingerprint=$OCI_FP" >> $HOME/.oci/config
+          echo "tenancy=$OCI_TEN" >> $HOME/.oci/config
+          echo "region=$OCI_REG" >> $HOME/.oci/config
+          echo "key_file=$HOME/.oci/key.pem" >> $HOME/.oci/config
+          chmod 600 $HOME/.oci/config
+          
+          echo "=== HOME = $HOME ==="
+          echo "=== Key size ==="
+          wc -c $HOME/.oci/key.pem
+          echo "=== Fingerprint check ==="
+          CALC_FP=$(openssl rsa -pubout -outform DER -in $HOME/.oci/key.pem 2>/dev/null | openssl md5 -c | awk '{print $2}')
+          echo "Calculated: $CALC_FP"
+          echo "Expected:   $OCI_FP"
           echo "=== Config ==="
-          cat ~/.oci/config
-          echo "=== Test ==="
-          oci iam region list --output table | head -5
+          cat $HOME/.oci/config
 
       - name: Try Create VM
         env:
