@@ -1,12 +1,21 @@
 name: Try to Create OCI VM
 
 on:
-  # Run manually while validating OCI credentials; avoid repeated failed scheduled runs.
+  # Run once when this workflow is updated; keep scheduled retries disabled until verified.
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/try-create-vm.yml"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   create-vm:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Install OCI CLI
         run: pip install oci-cli
@@ -28,10 +37,15 @@ jobs:
           printf '%s' "$KEY_B64" | base64 --decode > "$HOME/.oci/key.pem"
           chmod 600 "$HOME/.oci/key.pem"
 
-          # Derive the OCI fingerprint from the private key to avoid a malformed/mismatched secret.
+          # Validate the private key before deriving the fingerprint.
+          if ! openssl rsa -in "$HOME/.oci/key.pem" -check -noout >/dev/null 2>&1; then
+            echo "::error::OCI_CLI_KEY_CONTENT did not decode to a valid RSA private key."
+            exit 1
+          fi
+
           CALC_FP=$(openssl rsa -pubout -outform DER -in "$HOME/.oci/key.pem" 2>/dev/null | openssl md5 -c | awk '{print $2}')
           if ! printf '%s' "$CALC_FP" | grep -Eq '^([0-9a-fA-F]{2}:){15}[0-9a-fA-F]{2}$'; then
-            echo "Could not derive a valid OCI fingerprint from OCI_CLI_KEY_CONTENT."
+            echo "::error::Could not derive a valid OCI fingerprint from OCI_CLI_KEY_CONTENT."
             exit 1
           fi
 
@@ -45,9 +59,8 @@ jobs:
           } > "$HOME/.oci/config"
           chmod 600 "$HOME/.oci/config"
 
-          echo "Private key loaded; derived fingerprint format is valid."
-          echo "Fingerprint: $CALC_FP"
-          echo "OCI config created (values hidden)."
+          # Do not print credentials or fingerprints to the Actions log.
+          echo "OCI key validated and config created."
 
       - name: Try Create VM
         env:
