@@ -1,8 +1,7 @@
 name: Try to Create OCI VM
 
 on:
-  schedule:
-    - cron: '*/10 * * * *'
+  # Run manually while validating OCI credentials; avoid repeated failed scheduled runs.
   workflow_dispatch:
 
 jobs:
@@ -16,31 +15,39 @@ jobs:
         env:
           KEY_B64: ${{ secrets.OCI_CLI_KEY_CONTENT }}
           OCI_USER: ${{ secrets.OCI_CLI_USER }}
-          OCI_FP: ${{ secrets.OCI_CLI_FINGERPRINT }}
           OCI_TEN: ${{ secrets.OCI_CLI_TENANCY }}
           OCI_REG: ${{ secrets.OCI_CLI_REGION }}
         run: |
-          mkdir -p $HOME/.oci
-          echo "$KEY_B64" | base64 -d > $HOME/.oci/key.pem
-          chmod 600 $HOME/.oci/key.pem
-          
-          echo "[DEFAULT]" > $HOME/.oci/config
-          echo "user=$OCI_USER" >> $HOME/.oci/config
-          echo "fingerprint=$OCI_FP" >> $HOME/.oci/config
-          echo "tenancy=$OCI_TEN" >> $HOME/.oci/config
-          echo "region=$OCI_REG" >> $HOME/.oci/config
-          echo "key_file=$HOME/.oci/key.pem" >> $HOME/.oci/config
-          chmod 600 $HOME/.oci/config
-          
-          echo "=== HOME = $HOME ==="
-          echo "=== Key size ==="
-          wc -c $HOME/.oci/key.pem
-          echo "=== Fingerprint check ==="
-          CALC_FP=$(openssl rsa -pubout -outform DER -in $HOME/.oci/key.pem 2>/dev/null | openssl md5 -c | awk '{print $2}')
-          echo "Calculated: $CALC_FP"
-          echo "Expected:   $OCI_FP"
-          echo "=== Config ==="
-          cat $HOME/.oci/config
+          set -euo pipefail
+          : "${KEY_B64:?Missing GitHub secret OCI_CLI_KEY_CONTENT}"
+          : "${OCI_USER:?Missing GitHub secret OCI_CLI_USER}"
+          : "${OCI_TEN:?Missing GitHub secret OCI_CLI_TENANCY}"
+          : "${OCI_REG:?Missing GitHub secret OCI_CLI_REGION}"
+
+          mkdir -p "$HOME/.oci"
+          printf '%s' "$KEY_B64" | base64 --decode > "$HOME/.oci/key.pem"
+          chmod 600 "$HOME/.oci/key.pem"
+
+          # Derive the OCI fingerprint from the private key to avoid a malformed/mismatched secret.
+          CALC_FP=$(openssl rsa -pubout -outform DER -in "$HOME/.oci/key.pem" 2>/dev/null | openssl md5 -c | awk '{print $2}')
+          if ! printf '%s' "$CALC_FP" | grep -Eq '^([0-9a-fA-F]{2}:){15}[0-9a-fA-F]{2}$'; then
+            echo "Could not derive a valid OCI fingerprint from OCI_CLI_KEY_CONTENT."
+            exit 1
+          fi
+
+          {
+            echo "[DEFAULT]"
+            echo "user=$OCI_USER"
+            echo "fingerprint=$CALC_FP"
+            echo "tenancy=$OCI_TEN"
+            echo "region=$OCI_REG"
+            echo "key_file=$HOME/.oci/key.pem"
+          } > "$HOME/.oci/config"
+          chmod 600 "$HOME/.oci/config"
+
+          echo "Private key loaded; derived fingerprint format is valid."
+          echo "Fingerprint: $CALC_FP"
+          echo "OCI config created (values hidden)."
 
       - name: Try Create VM
         env:
@@ -48,12 +55,19 @@ jobs:
           SID: ${{ secrets.OCI_SUBNET_ID }}
           IID: ${{ secrets.IMAGE_ID }}
         run: |
+          set -euo pipefail
+          : "${CID:?Missing GitHub secret OCI_COMPARTMENT_ID}"
+          : "${SID:?Missing GitHub secret OCI_SUBNET_ID}"
+          : "${IID:?Missing GitHub secret IMAGE_ID}"
+
           for AD in "Uocm:EU-FRANKFURT-1-AD-1" "Uocm:EU-FRANKFURT-1-AD-2" "Uocm:EU-FRANKFURT-1-AD-3"; do
             echo "=== Trying $AD ==="
-            if oci compute instance launch --availability-domain "$AD" --compartment-id "$CID" --shape "VM.Standard.A1.Flex" --shape-config '{"ocpus": 2, "memoryInGBs": 12}' --image-id "$IID" --subnet-id "$SID" --assign-public-ip true --display-name "Asia" 2>&1; then
-              echo "SUCCESS!"
+            if oci compute instance launch --availability-domain "$AD" --compartment-id "$CID" --shape "VM.Standard.A1.Flex" --shape-config '{"ocpus": 2, "memoryInGBs": 12}' --image-id "$IID" --subnet-id "$SID" --assign-public-ip true --display-name "Asia"; then
+              echo "SUCCESS! Instance created in $AD."
               exit 0
+            else
+              echo "Launch failed in $AD; trying next availability domain."
             fi
           done
-          echo "All ADs failed"
+          echo "All availability domains failed."
           exit 1
